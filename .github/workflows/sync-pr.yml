@@ -1,0 +1,47 @@
+name: Sync PR to GitLab
+
+on:
+  workflow_call:
+    inputs:
+      gitlab_repo:
+        required: true
+        type: string
+      gitlab_target_branch:
+        required: true
+        type: string
+    secrets:
+      gitlab_token:
+        required: true
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Set Git user
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Push PR branch to GitLab
+        run: |
+          export GITLAB_URL=https://oauth2:${{ secrets.gitlab_token }}@gitlab.com/${{ inputs.gitlab_repo }}.git
+          git remote add gitlab $GITLAB_URL
+          git push gitlab HEAD:refs/heads/github-pr-${{ github.event.number }}
+
+      - name: Create MR on GitLab
+        run: |
+          curl --fail --silent --show-error --request POST \
+            --header "PRIVATE-TOKEN: ${{ secrets.gitlab_token }}" \
+            --header "Content-Type: application/json" \
+            --data '{
+              "source_branch": "github-pr-${{ github.event.number }}",
+              "target_branch": "${{ inputs.gitlab_target_branch }}",
+              "title": "PR #${{ github.event.number }} from GitHub: ${{ github.event.pull_request.title }}",
+              "description": "${{ github.event.pull_request.body }}\n\n---\nCloned from GitHub PR: ${{ github.event.pull_request.html_url }}"
+            }' \
+            "https://gitlab.com/api/v4/projects/$(echo -n '${{ inputs.gitlab_repo }}' | sed 's/\//%2F/g')/merge_requests"
